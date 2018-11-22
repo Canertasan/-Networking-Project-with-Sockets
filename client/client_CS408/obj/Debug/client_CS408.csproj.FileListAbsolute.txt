@@ -1,0 +1,9 @@
+c:\users\abra\documents\visual studio 2012\Projects\client_CS408\client_CS408\bin\Debug\client_CS408.exe.config
+c:\users\abra\documents\visual studio 2012\Projects\client_CS408\client_CS408\obj\Debug\client_CS408.csprojResolveAssemblyReference.cache
+c:\users\abra\documents\visual studio 2012\Projects\client_CS408\client_CS408\obj\Debug\client_CS408.Form1.resources
+c:\users\abra\documents\visual studio 2012\Projects\client_CS408\client_CS408\obj\Debug\client_CS408.Properties.Resources.resources
+c:\users\abra\documents\visual studio 2012\Projects\client_CS408\client_CS408\obj\Debug\client_CS408.csproj.GenerateResource.Cache
+c:\users\abra\documents\visual studio 2012\Projects\client_CS408\client_CS408\bin\Debug\client_CS408.exe
+c:\users\abra\documents\visual studio 2012\Projects\client_CS408\client_CS408\bin\Debug\client_CS408.pdb
+c:\users\abra\documents\visual studio 2012\Projects\client_CS408\client_CS408\obj\Debug\client_CS408.exe
+c:\users\abra\documents\visual studio 2012\Projects\client_CS408\client_CS408\obj\Debug\client_CS408.pdb
