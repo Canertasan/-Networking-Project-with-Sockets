@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -15,49 +16,47 @@ namespace HW1_CS408
 {
     public partial class Form1 : Form
     {
+        public struct client
+        {
+            public Socket clientSockets;
+            public string name;
+            public int scores;
+            public client(string nameI, int scoresI, Socket clientSocketsI)
+            {
+                name = nameI;
+                scores = scoresI;
+                clientSockets = clientSocketsI;
+            }
+
+        };
         delegate void StringArgReturningVoidDelegate(string text);
         static Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp); // our server soc.
-        static List<Socket> clientSockets = new List<Socket>(); // these are client sockets list.
-        static List<String> nameList = new List<String>(); // these are names which we will check for uniquenesss
+        static List<client> clientList = new List<client>();
+        public static client clientInfo;
         static bool terminating = false; // ?
         static bool accept = true; // ?
+        static int totalTurn = 0;
+        Thread acceptThread;
+        Thread checkLobby;
+        Thread receiveThread;
         int portNum = 0; // this is port num for connection.
+        bool started = false;
         String ques = "";
         String answer = "";
         String clientAnswer = "";
-        Byte[] buffer = new Byte[64];
-        private const int SOCKET_COUNT_MAX = 2;
+        static Byte[] buffer = new Byte[64];
+        private const int SOCKET_COUNT_MAX = 10000;
         static bool connection = true;
-
-        //public static bool isConnected() // if some player is gone then remove client... Before Game
-        //{
-        //    try
-        //    {
-        //        foreach (Socket socket in clientSockets)
-        //        {
-        //            if (socket.Poll(1, SelectMode.SelectRead) && socket.Available == 0)
-        //            {
-        //                int index = clientSockets.IndexOf(socket); // removing the lost connection...
-        //                clientSockets.Remove(socket);
-        //                nameList.Remove(nameList[index]);
-        //                return false;
-        //            }
-        //        }
-        //        return true;
-        //    }
-        //    catch (SocketException)
-        //    {
-        //        return false;
-        //    }
-
-        //}
 
         public Form1()
         {
-            // form initializer
             InitializeComponent();
             this.richTextBox1.Visible = false;
+            this.label3.Visible = false;
+            this.label4.Visible = false;
+            this.label1.Visible = false;
             this.button2.Visible = false;
+            this.textBox2.Visible = false;
         }
 
         private void richTextBox1_TextChanged(object sender, EventArgs e)
@@ -65,67 +64,85 @@ namespace HW1_CS408
 
         }
 
-
         private void button1_Click(object sender, EventArgs e)
         {
             this.button1.Visible = false; // after starting listening hide all first 3 button,label,textbox.
             this.label2.Visible = false;
             this.textBox1.Visible = false;
             this.richTextBox1.Visible = true; // show richtextBox to analyze the results.
-            // server decide port number.
+            this.label1.Visible = true;
+            this.button2.Visible = true;
+            this.textBox2.Visible = true;
             portNum = int.Parse(textBox1.Text); // taking port num as int
             IPEndPoint endPoint = new IPEndPoint(IPAddress.Any, portNum); // creating end point.
             serverSocket.Bind(endPoint); // then bind the endpoint with server socket
             serverSocket.Listen(SOCKET_COUNT_MAX); // then listen for 2 client
-            this.richTextBox1.AppendText("Listening..." + Environment.NewLine + "Waiting for 2 Players." + Environment.NewLine); // server listening
+            this.richTextBox1.AppendText("Listening..." + Environment.NewLine + "Waiting for Players." + Environment.NewLine); // server listening
             this.Text = "SERVER";
-            Thread acceptThread = new Thread(Accept); // will accept or not in clients
+            acceptThread = new Thread(Accept); // will accept or not in clients
             acceptThread.Start(); // thread start...
-
+            checkLobby = new Thread(CheckLobbyThread);
+            checkLobby.Start();
         }
-
-        public bool StillConnect()
+        void CheckLobbyThread() // the checker thread for number of clients if there is one then game is over.
         {
-
-            return false;
+            while (true)
+            {
+                int clientSize = 0;
+                for (int i = 0; i < clientList.Count(); i++)
+                {
+                    if (clientList[i].clientSockets.Available == 0)
+                    {
+                        clientSize++;
+                    }
+                    else
+                    {
+                        SetRichText(clientList[i].name + " exit the game" + Environment.NewLine);
+                        clientList.Remove(clientList[i]);
+                        SetRichText(clientList.Count() + " player left" + Environment.NewLine);
+                    }
+                }
+            }
         }
 
         void Accept()
         {
-            while (accept)
+            while (accept && !started)
             {
                 try
                 {
                     Socket newClient = serverSocket.Accept(); // new client socket is created.
-                    clientSockets.Add(newClient); // add the client list   
+                    checkLobby.Suspend();
+                    clientInfo.name = "";
+                    clientInfo.scores = 0;
+                    clientInfo.clientSockets = newClient;
+                    clientList.Add(clientInfo);
                     String name = ReceiveName(); // client name.
 
-                    if (nameList.Count() != 0 && nameList.Contains(name)) // if there is same in the list
+                    if (clientList.Count() != 0 && (clientList.Any(client => client.name == name))) // if there is same in the list
                     {
-                        clientSockets.Remove(newClient); // remove the list of client socket.
                         String reject = "reject"; // reject message to client...
                         byte[] msg = Encoding.ASCII.GetBytes(reject);
+                        newClient.Send(Encoding.ASCII.GetBytes(reject.Length.ToString()));
+                        Thread.Sleep(1000);
                         newClient.Send(msg);
                         SetRichText("Client attempt to connect server with another currently logged in username." + Environment.NewLine + name + " is already taken!");
                         newClient.Close(); // close newclient.
                     }
                     else
                     {
-                        String ok = "ok"; // reject message to client...
+                        clientList.Remove(clientInfo);
+                        clientInfo.name = name;
+                        clientList.Add(clientInfo);
+                        String ok = "ok";
                         byte[] msg = Encoding.ASCII.GetBytes(ok);
+                        newClient.Send(Encoding.ASCII.GetBytes(ok.Length.ToString()));
+                        Thread.Sleep(1000);
                         newClient.Send(msg);
-                        nameList.Add(name); // first add name in the list
-
-                        String added = name + " is connected." + " Total: " + (clientSockets.Count()).ToString() + " clients are connected. " + Environment.NewLine;
+                        String added = name + " is connected." + " Total: " + (clientList.Count()).ToString() + " clients are connected. " + Environment.NewLine;
                         SetRichText(added);
-                        if (clientSockets.Count() == 2) // when two player is active. Dont receive now.
-                        {
-                            SetRichText("Game started!" + Environment.NewLine);
-                            SetVisibility(button2, true);
-                            Thread receiveThread = new Thread(GameStart); // thread for new client
-                            receiveThread.Start();
-                        }
                     }
+                    checkLobby.Resume();
                 }
                 catch
                 {
@@ -136,14 +153,13 @@ namespace HW1_CS408
                         CloseAllClients();
                     }
                     else
-                    { // if just connection lost.
-                        foreach (Socket socket in clientSockets)
+                    { // if just connection lost. // HOW TO SEARCH FOR OTHER CLIENT SOCKET IN CLIENT LIST
+                        for (int i = 0; i < clientList.Count(); i++)
                         {
-                            if (socket.Poll(1, SelectMode.SelectRead) && socket.Available == 0)
+                            if (clientList[i].clientSockets.Poll(1, SelectMode.SelectRead) && clientList[i].clientSockets.Available == 0)
                             {
-                                int index = clientSockets.IndexOf(socket); // removing the lost connection...
-                                clientSockets.Remove(socket);
-                                nameList.Remove(nameList[index]);
+                                int index = clientList.FindIndex(client => client.clientSockets == clientList[i].clientSockets); // removing the lost connection...
+                                clientList.Remove(clientList[index]);
                             }
                         }
                     }
@@ -153,125 +169,182 @@ namespace HW1_CS408
 
         void GameStart()
         {
-            for (int i = 0; i < clientSockets.Count(); i++)
+            Thread checkClientThread = new Thread(checkClientThreadCurr); // will check all clients connection all the time.
+            checkClientThread.Start(); // thread start...
+            for (int i = 0; i < clientList.Count(); i++)
             {
-                clientSockets[i].Send(Encoding.ASCII.GetBytes("start"));
+                clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes("5"));
+                Thread.Sleep(1000);
+                clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes("start"));
             }
-            String minElement = nameList.Min();  // minNumber: 2
-            int index = nameList.IndexOf(minElement);
+            clientList = clientList.OrderBy(client => client.name).ToList();  // this sort the list in terms of name
             bool exit = false;
-            while (clientSockets[0].Connected && clientSockets[1].Connected && !exit)
+            int index = 0; // then the first starter start at 0 index
+            while (!exit && index != totalTurn)
             {
                 try
                 {
-                    int turnSocketIndex = index % clientSockets.Count();
-
-                    SetRichText(nameList[turnSocketIndex] + "'s turn" + Environment.NewLine);
-                    clientSockets[turnSocketIndex].Send(Encoding.ASCII.GetBytes("Your Turn create a question"));
-                    clientSockets[turnSocketIndex].Receive(buffer);
-                    ques = Encoding.ASCII.GetString(buffer);
-                    Array.Clear(buffer, 0, buffer.Length);
-                    int indexx = ques.IndexOf("\0");
-                    ques = ques.Substring(0, indexx);
-                    SetRichText(nameList[turnSocketIndex] + "'s question: " + ques + Environment.NewLine);
-                    clientSockets[turnSocketIndex].Receive(buffer);
-                    answer = Encoding.ASCII.GetString(buffer);
-                    Array.Clear(buffer, 0, buffer.Length);
-                    indexx = answer.IndexOf("\0");
-                    answer = answer.Substring(0, indexx);
-                    SetRichText(nameList[turnSocketIndex] + "'s answer: " + answer + Environment.NewLine);
-                    /* STEP 2 DE KULLAN
-                    for (int i = 1; i < clientSockets.Count() ; i++) // send question all client.
+                    Thread.Sleep(5000);
+                    SetRichText(clientList[index].name + "'s turn" + Environment.NewLine);
+                    clientList[index].clientSockets.Send(Encoding.ASCII.GetBytes("27"));
+                    Thread.Sleep(1000);
+                    clientList[index].clientSockets.Send(Encoding.ASCII.GetBytes("Your Turn create a question"));
+                    ques = ReceiveByte(index);
+                    if (ques == "Exited")
+                        continue;
+                    SetRichText(clientList[index].name + "'s question: " + ques + Environment.NewLine);
+                    answer = ReceiveByte(index);
+                    SetRichText(clientList[index].name + "'s answer: " + answer + Environment.NewLine);
+                    List<String> answerList = new List<String>();
+                    for (int i = 1; i < clientList.Count(); i++) // send question all client.
                     {
-                        clientSockets[index+i % clientSockets.Count()].Send(Encoding.ASCII.GetBytes(ques));
-                        // BURAYA GELDİGİ GİBİ DİNLESİN CEVABI
+                        clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes("17"));
+                        Thread.Sleep(1000);
+                        clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes("Wait for question"));
+                        SetRichText(clientList[((index + i) % clientList.Count())].name + " can answer the question. " + Environment.NewLine);
+                        clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes(ques.Length.ToString()));//send question to others
+                        Thread.Sleep(1000);
+                        clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes(ques));//send question to others
                     }
-                     */
-                    int otherSocket = (index + 1) % clientSockets.Count();
-                    SetRichText(nameList[otherSocket] + "'s turn to answer. " + Environment.NewLine);
-                    clientSockets[otherSocket].Send(Encoding.ASCII.GetBytes("Wait for question"));
-                    clientSockets[otherSocket].Send(Encoding.ASCII.GetBytes(ques));
-                    clientSockets[otherSocket].Receive(buffer);
-                    clientAnswer = Encoding.ASCII.GetString(buffer);
-                    Array.Clear(buffer, 0, buffer.Length);
-                    indexx = clientAnswer.IndexOf("\0");
-                    clientAnswer = clientAnswer.Substring(0, indexx);
-                    if (clientAnswer.Contains(answer)) // answer check
+                    int counter = 0;
+                    while (counter != clientList.Count() - 1)
                     {
-                        SetRichText(nameList[otherSocket] + " answered correctly. " + Environment.NewLine);
-                    }
-                    else
-                    {
-                        SetRichText(nameList[otherSocket] + " couldn't answered correctly. " + Environment.NewLine);
+                        for (int i = 1; i < clientList.Count(); i++)
+                        {
+                            if (clientList[((index + i) % clientList.Count())].clientSockets.Available != 0)
+                            {
+                                SetRichText(clientList[((index + i) % clientList.Count())].name + " answered the question." + Environment.NewLine);
+                                clientAnswer = ReceiveByte(((index + i) % clientList.Count()));
+                            }
+                            else
+                                continue;
+                            if (clientAnswer == "Exited")
+                            {
+                                counter++;
+                                continue;
+                            }
+                            if (clientAnswer.Contains(answer)) // answer check
+                            {
+                                SetRichText(clientList[((index + i) % clientList.Count())].name + " answered correctly.So s/he get one point." + Environment.NewLine);
+                                client c = clientList[((index + i) % clientList.Count())];
+                                clientList.Remove(c);
+                                c.scores++;
+                                clientList.Add(c);
+                                clientList = clientList.OrderBy(client => client.name).ToList();  // this sort the list in terms of name
+                                SetRichText( "Current score is: " + clientList[((index + i) % clientList.Count())].scores+ Environment.NewLine);
+                                counter++;
+                            }
+                            else
+                            {
+                                SetRichText(clientList[((index + i) % clientList.Count())].name + " couldn't answered correctly. " + Environment.NewLine);
+                                counter++;
+                            }
+                        }
                     }
                 }
                 catch (SocketException e)
                 {
-                    if (SocketError.ConnectionReset == e.SocketErrorCode)
-                    {
-                        SetRichText("One of the client left, so game is over bye..." + Environment.NewLine); // if is not still connected or some problem with connection.
-                        CloseAllClients();
-                    }  
-                    exit = true;
+
                 }
                 index++;// changing the turn
             }
+            checkClientThread.Abort();
+            if (index == totalTurn)//sending results.
+            {
+                clientList = clientList.OrderByDescending(client => client.scores).ThenBy(client => client.scores).ToList(); // this sort the list in terms of name
+                for (int i = 0; i < clientList.Count(); i++) // send question all client.
+                {
+                    String result = (i+1) + ". place => Your Total Score is " + clientList[i].scores.ToString();
+                    clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes(result.Length.ToString()));
+                    Thread.Sleep(1000);
+                    clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes(result));
+                    SetRichText(clientList[i].name + " " + (i+1) + ". place => Total Score is " + clientList[i].scores + Environment.NewLine);
+                }
+                Thread.Sleep(10000);
+                SetRichText("GAME END!" + Environment.NewLine);
+                CloseAllClients();
+            }
         }
+
+        void checkClientThreadCurr() // the checker thread for number of clients if there is one then game is over.
+        {
+            while (true)
+            {
+                int clientSize = 0;
+                for (int i = 0; i < clientList.Count(); i++)
+                {
+                    if (!(clientList[i].clientSockets.Poll(1, SelectMode.SelectRead) && clientList[i].clientSockets.Available == 0))
+                    {
+                        clientSize++;
+                    }
+                    else
+                    {
+                        SetRichText(clientList[i].name + " is exit the game" + Environment.NewLine);
+                        clientList.Remove(clientList[i]);
+                        SetRichText(clientList.Count() + " player is left" + Environment.NewLine);
+                    }
+                }
+                if (clientList.Count() < 2)
+                {
+                    String result = "You are the winner and game is finished";
+                    clientList[0].clientSockets.Send(Encoding.ASCII.GetBytes(result.Length.ToString()));
+                    Thread.Sleep(1000);
+                    clientList[0].clientSockets.Send(Encoding.ASCII.GetBytes(result));
+                    SetRichText(clientList[0].name + " is " +result.Substring(7,(result.Length-1)) + Environment.NewLine);
+                    Thread.Sleep(5000);
+                    CloseAllClients();
+                }
+            }
+        }
+
         void CloseAllClients()
         {
-            for (int i = 0; i < clientSockets.Count(); i++)
+            for (int i = 0; i < clientList.Count(); i++)
             {
-                Socket thisClient = clientSockets[i];
+                Socket thisClient = clientList[i].clientSockets;
                 thisClient.Close();
             }
             serverSocket.Close();
-            Thread.Sleep(5000);
+            Thread.Sleep(10000);
             System.Windows.Forms.Application.Exit();
         }
 
-        void Receive()
-        {
-            bool connected = true;
-            int lenClientSoc = clientSockets.Count();
-            Socket thisClient = clientSockets[lenClientSoc - 1]; // create thisClient which is connected last one
-            String clientName = nameList[lenClientSoc - 1]; // client name also.
-
-            while (connected && !terminating)
-            {
-                try
-                { // taking client strings .
-                    Byte[] buffer = new Byte[64];
-                    thisClient.Receive(buffer);
-                    SetRichText("Client: " + Encoding.Default.GetString(buffer));
-
-                }
-                catch
-                {
-                    connected = false; // clients down.
-                    if (!terminating)
-                    {
-                        SetRichText("Client has disconnected...");
-                    }
-                    nameList.Remove(clientName);
-                    thisClient.Close();
-                    clientSockets.Remove(thisClient);
-                }
-            }
-
-
-        }
         static String ReceiveName() // return name.
         {
-            int lenClientSoc = clientSockets.Count();
-            Socket thisClient = clientSockets[lenClientSoc - 1];
+            int lenClientSoc = clientList.Count() - 1;
+            Socket thisClient = clientList[lenClientSoc].clientSockets;
             Byte[] buffer = new Byte[64];
             thisClient.Receive(buffer);
-            string name = Encoding.ASCII.GetString(buffer);
-            Array.Clear(buffer, 0, buffer.Length);
-            int index = name.IndexOf("\0");
-            name = name.Substring(0, index);
+            int len = int.Parse(Encoding.ASCII.GetString(buffer));
+            Byte[] bufferLen = new Byte[len];
+            thisClient.Receive(bufferLen);
+            String name = Encoding.ASCII.GetString(bufferLen);
             return name;
         }
+
+        static String ReceiveByte(int i) // return name.
+        {
+            try
+            {
+                Socket thisClient = clientList[i].clientSockets;
+                Byte[] buffer = new Byte[64];
+                thisClient.Receive(buffer);
+                int len = int.Parse(Encoding.ASCII.GetString(buffer));
+                Array.Clear(buffer, 0, buffer.Length);
+                Byte[] bufferLen = new Byte[len];
+                thisClient.Receive(bufferLen);
+                String name = Encoding.ASCII.GetString(bufferLen);
+                return name;
+            }
+            catch
+            {
+                return "Error";
+            }
+
+            return "Error";
+
+        }
+
 
         public static void SetVisibility(Button t, bool v)// changes the visibility of the given 
         {
@@ -298,9 +371,36 @@ namespace HW1_CS408
 
         private void button2_Click(object sender, EventArgs e)
         {
-            CloseAllClients();
+            if (clientList.Count() >= 2)
+            {
+                this.label3.Visible = false;
+                bool IsTextInt = Regex.IsMatch(textBox2.Text, @"^\d+$"); // if it is integer then turn true;
+                if (IsTextInt)
+                {
+                    acceptThread.Suspend();
+                    checkLobby.Suspend();
+                    this.label4.Visible = false;
+                    this.label1.Visible = false;
+                    this.button2.Visible = false;
+                    this.textBox2.Visible = false;
+                    this.richTextBox1.Left -= 100;
+                    totalTurn = int.Parse(textBox2.Text);
+                    receiveThread = new Thread(GameStart); // thread for new client
+                    started = true; // thşs prevent after the game start accept thread is finish.
+                    receiveThread.Start();
+                }
+                else
+                {
+                    this.label4.Visible = true;
+                }
+
+            }
+            else
+                this.label3.Visible = true;
+
         }
 
-
     }
+
+
 }
