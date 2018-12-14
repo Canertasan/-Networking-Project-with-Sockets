@@ -33,9 +33,12 @@ namespace HW1_CS408
         static Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp); // our server soc.
         static List<client> clientList = new List<client>();
         public static client clientInfo;
+        private static Mutex mut = new Mutex();
         static bool terminating = false; // ?
         static bool accept = true; // ?
         static int totalTurn = 0;
+        static public bool exit;
+        static public int index;
         Thread acceptThread;
         Thread checkLobby;
         Thread receiveThread;
@@ -126,7 +129,8 @@ namespace HW1_CS408
                         newClient.Send(Encoding.ASCII.GetBytes(reject.Length.ToString()));
                         Thread.Sleep(1000);
                         newClient.Send(msg);
-                        SetRichText("Client attempt to connect server with another currently logged in username." + Environment.NewLine + name + " is already taken!");
+                        SetRichText("Client attempt to connect server with another currently logged in username." + Environment.NewLine + name + " is already taken!"+ Environment.NewLine);
+                        clientList.Remove(clientInfo);
                         newClient.Close(); // close newclient.
                     }
                     else
@@ -148,7 +152,7 @@ namespace HW1_CS408
                 {
                     if (terminating)
                     {// if server is terminate
-                        SetRichText("Server stopped working, all connected clients will be terminated.");
+                        SetRichText("Server stopped working, all connected clients will be terminated." + Environment.NewLine);
                         accept = false;
                         CloseAllClients();
                     }
@@ -169,6 +173,8 @@ namespace HW1_CS408
 
         void GameStart()
         {
+            //checkLobby.Abort();
+            //acceptThread.Abort();
             Thread checkClientThread = new Thread(checkClientThreadCurr); // will check all clients connection all the time.
             checkClientThread.Start(); // thread start...
             for (int i = 0; i < clientList.Count(); i++)
@@ -178,13 +184,14 @@ namespace HW1_CS408
                 clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes("start"));
             }
             clientList = clientList.OrderBy(client => client.name).ToList();  // this sort the list in terms of name
-            bool exit = false;
-            int index = 0; // then the first starter start at 0 index
-            while (!exit && index != totalTurn)
+            exit = false;
+            index = -1; // then the first starter start at 0 index
+            while (!exit && index != totalTurn-1) // index start in 0 then total turn -1
             {
                 try
                 {
                     Thread.Sleep(5000);
+                    index++;// changing the turn
                     SetRichText(clientList[index].name + "'s turn" + Environment.NewLine);
                     clientList[index].clientSockets.Send(Encoding.ASCII.GetBytes("27"));
                     Thread.Sleep(1000);
@@ -196,6 +203,8 @@ namespace HW1_CS408
                     answer = ReceiveByte(index);
                     SetRichText(clientList[index].name + "'s answer: " + answer + Environment.NewLine);
                     List<String> answerList = new List<String>();
+                    //mut.WaitOne();
+                    checkClientThread.Suspend();
                     for (int i = 1; i < clientList.Count(); i++) // send question all client.
                     {
                         clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes("17"));
@@ -205,7 +214,7 @@ namespace HW1_CS408
                         clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes(ques.Length.ToString()));//send question to others
                         Thread.Sleep(1000);
                         clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes(ques));//send question to others
-                    }
+                    }            
                     int counter = 0;
                     while (counter != clientList.Count() - 1)
                     {
@@ -213,8 +222,9 @@ namespace HW1_CS408
                         {
                             if (clientList[((index + i) % clientList.Count())].clientSockets.Available != 0)
                             {
-                                SetRichText(clientList[((index + i) % clientList.Count())].name + " answered the question." + Environment.NewLine);
                                 clientAnswer = ReceiveByte(((index + i) % clientList.Count()));
+                                if (clientAnswer != "Exited")
+                                    SetRichText(clientList[((index + i) % clientList.Count())].name + " answered the question." + Environment.NewLine);
                             }
                             else
                                 continue;
@@ -236,19 +246,26 @@ namespace HW1_CS408
                             }
                             else
                             {
+                                if (clientAnswer == "Exited")
+                                {
+                                    counter++;
+                                    continue;
+                                }
                                 SetRichText(clientList[((index + i) % clientList.Count())].name + " couldn't answered correctly. " + Environment.NewLine);
                                 counter++;
                             }
                         }
                     }
+                    //mut.ReleaseMutex();
+                    checkClientThread.Resume();
                 }
                 catch (SocketException e)
                 {
 
                 }
-                index++;// changing the turn
+                
             }
-            checkClientThread.Abort();
+            checkClientThread.Suspend();
             if (index == totalTurn)//sending results.
             {
                 clientList = clientList.OrderByDescending(client => client.scores).ThenBy(client => client.scores).ToList(); // this sort the list in terms of name
@@ -279,6 +296,8 @@ namespace HW1_CS408
                     }
                     else
                     {
+                        if (clientList[index].clientSockets == clientList[i].clientSockets)
+                            index--;
                         SetRichText(clientList[i].name + " is exit the game" + Environment.NewLine);
                         clientList.Remove(clientList[i]);
                         SetRichText(clientList.Count() + " player is left" + Environment.NewLine);
@@ -287,10 +306,11 @@ namespace HW1_CS408
                 if (clientList.Count() < 2)
                 {
                     String result = "You are the winner and game is finished";
+                    exit = true; // to finish the loop
                     clientList[0].clientSockets.Send(Encoding.ASCII.GetBytes(result.Length.ToString()));
                     Thread.Sleep(1000);
                     clientList[0].clientSockets.Send(Encoding.ASCII.GetBytes(result));
-                    SetRichText(clientList[0].name + " is " +result.Substring(7,(result.Length-1)) + Environment.NewLine);
+                    SetRichText(clientList[0].name + " is the winner" + Environment.NewLine);
                     Thread.Sleep(5000);
                     CloseAllClients();
                 }
@@ -340,9 +360,6 @@ namespace HW1_CS408
             {
                 return "Error";
             }
-
-            return "Error";
-
         }
 
 
