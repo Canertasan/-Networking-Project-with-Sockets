@@ -22,6 +22,7 @@ namespace client_CS408
         static String turn = "";
         static bool isTurn = false;
         static bool sameName = true;
+        static bool sended = false;
         static bool IsGameContinue = false;
         int portNum = 0;
         Byte[] buffer = new Byte[64];
@@ -78,6 +79,7 @@ namespace client_CS408
                 {
                     while (sameName)
                     {
+                        clientSoc = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                         clientSoc.Connect(serverIP, portNum); //  create connection for request to the server.
                         SendByte(textBox5.Text);
                         if (ReceiveName().Contains("reject")) // reject or not.
@@ -85,7 +87,7 @@ namespace client_CS408
                             this.label6.Visible = true;
                             this.label6.Text = "There is a same name user. Chose different one."; // if is not still connected or some problem with connection.
                             connected = false;
-                            clientSoc.Close();
+                            break;
                         }
                         else
                         {
@@ -140,6 +142,7 @@ namespace client_CS408
                         turn = ReceiveName();
                         if (turn.Contains("Your Turn create a question"))
                         {
+                            sended = false;
                             SetVisibility(button2, true);
                             SetVisibility(textBox3, true);//visibility changes...
                             SetVisibility(textBox4, true);//visibility changes...
@@ -148,6 +151,7 @@ namespace client_CS408
                         }
                         else if (turn.Contains("Wait for question"))
                         {
+                            sended = false;
                             SetVisibility(button2, false);
                             SetRichText("Wait for the player to make question" + Environment.NewLine);
                             isTurn = false;
@@ -159,6 +163,7 @@ namespace client_CS408
                                 break;
                             }
                             SetRichText("Server: your question: " + question + Environment.NewLine); // when server send message.
+                            sended = false;
                             SetVisibility(button2, true);
                         }
                         else// if game finish break the loop
@@ -260,6 +265,7 @@ namespace client_CS408
         {
             if (isTurn && this.textBox4.Text != "" && this.textBox3.Text != "")
             {
+                sended = true; 
                 SendByte(this.textBox4.Text);
                 Thread.Sleep(1000);
                 SendByte(this.textBox3.Text);
@@ -273,6 +279,7 @@ namespace client_CS408
             }
             else if (!isTurn && this.textBox3.Text != "")
             {
+                sended = true; 
                 SendByte(this.textBox3.Text);
                 SetVisibility(textBox3, false);
                 textMakeEmpty(textBox3);
@@ -301,7 +308,8 @@ namespace client_CS408
 
         private void exitButton_Click(object sender, EventArgs e)
         {
-            SendByte("Exited");
+            if (!sended)
+                SendByte("Exited");
             clientSoc.Shutdown(SocketShutdown.Both);
             clientSoc.Close();
             SetRichText("EXITING GAME...");
