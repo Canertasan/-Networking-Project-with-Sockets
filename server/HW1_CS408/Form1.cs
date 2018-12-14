@@ -266,7 +266,7 @@ namespace HW1_CS408
                 
             }
             checkClientThread.Suspend();
-            if (index == totalTurn)//sending results.
+            if (index == totalTurn-1)//sending results.
             {
                 clientList = clientList.OrderByDescending(client => client.scores).ThenBy(client => client.scores).ToList(); // this sort the list in terms of name
                 for (int i = 0; i < clientList.Count(); i++) // send question all client.
