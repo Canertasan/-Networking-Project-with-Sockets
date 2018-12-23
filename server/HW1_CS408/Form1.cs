@@ -35,8 +35,9 @@ namespace HW1_CS408
         public static client clientInfo;
         private static Mutex mut = new Mutex();
         static bool terminating = false; // ?
+        static bool finished = false; // ?
         static bool accept = true; // ?
-        static int totalTurn = 0;
+        static double totalTurn = 0;
         static public bool exit;
         static public int index;
         Thread acceptThread;
@@ -88,7 +89,7 @@ namespace HW1_CS408
             checkLobby.Start();
         }
         void CheckLobbyThread() // the checker thread for number of clients if there is one then game is over.
-        {
+        { // this is just for the lobby part. When the game start it will suspend
             while (true)
             {
                 int clientSize = 0;
@@ -99,7 +100,7 @@ namespace HW1_CS408
                         clientSize++;
                     }
                     else
-                    {
+                    { // exit when the client socket is not connected!
                         SetRichText(clientList[i].name + " exit the game" + Environment.NewLine);
                         clientList.Remove(clientList[i]);
                         SetRichText(clientList.Count() + " player left" + Environment.NewLine);
@@ -108,20 +109,19 @@ namespace HW1_CS408
             }
         }
 
-        void Accept()
-        {
-            while (accept && !started)
+        void Accept() // this is thread when the listen button clicked! This is basically accept ! When the start button is clicked then
+        { // accept button still going but we cannot take any client after that! We just show error to client!
+            while (accept)
             {
                 try
                 {
                     Socket newClient = serverSocket.Accept(); // new client socket is created.
-                    checkLobby.Suspend();
+                    checkLobby.Suspend(); // when the new client is on the way checkLobby thread is suspended! We dont wanna mess up the availablity in there
                     clientInfo.name = "";
                     clientInfo.scores = 0;
-                    clientInfo.clientSockets = newClient;
-                    clientList.Add(clientInfo);
+                    clientInfo.clientSockets = newClient; // our new client
+                    clientList.Add(clientInfo); // add list because we use Receive name function as added way. We dont add the name of it yet!
                     String name = ReceiveName(); // client name.
-
                     if (clientList.Count() != 0 && (clientList.Any(client => client.name == name))) // if there is same in the list
                     {
                         String reject = "reject"; // reject message to client...
@@ -130,27 +130,39 @@ namespace HW1_CS408
                         Thread.Sleep(1000);
                         newClient.Send(msg);
                         SetRichText("Client attempt to connect server with another currently logged in username." + Environment.NewLine + name + " is already taken!"+ Environment.NewLine);
-                        clientList.Remove(clientInfo);
+                        clientList.Remove(clientInfo); // We remove because we dont accept it 
                         newClient.Close(); // close newclient.
+                    }
+                    else if (started) // If game is started then client shouldnt be entered. We just simply warn the client!
+                    {
+                        SetRichText(name + " try to connect after the game started!" + Environment.NewLine); //
+                        String rejectExit = "game is already started"; // reject message to client...
+                        byte[] msg = Encoding.ASCII.GetBytes(rejectExit);
+                        newClient.Send(Encoding.ASCII.GetBytes(rejectExit.Length.ToString()));
+                        Thread.Sleep(1000);
+                        newClient.Send(msg);
+                        clientList.Remove(clientInfo); // remove that client
+                        newClient.Close(); // close the client
+                        continue;
                     }
                     else
                     {
-                        clientList.Remove(clientInfo);
+                        clientList.Remove(clientInfo); // just remove because we wanna add name to client
                         clientInfo.name = name;
-                        clientList.Add(clientInfo);
+                        clientList.Add(clientInfo); // then added again
                         String ok = "ok";
                         byte[] msg = Encoding.ASCII.GetBytes(ok);
-                        newClient.Send(Encoding.ASCII.GetBytes(ok.Length.ToString()));
+                        newClient.Send(Encoding.ASCII.GetBytes(ok.Length.ToString())); // send is it ok. You accept mean
                         Thread.Sleep(1000);
                         newClient.Send(msg);
                         String added = name + " is connected." + " Total: " + (clientList.Count()).ToString() + " clients are connected. " + Environment.NewLine;
                         SetRichText(added);
                     }
-                    checkLobby.Resume();
+                    checkLobby.Resume(); // then the thread working on! 
                 }
                 catch
                 {
-                    if (terminating)
+                    if (terminating) // If there is a problem server then terminated!
                     {// if server is terminate
                         SetRichText("Server stopped working, all connected clients will be terminated." + Environment.NewLine);
                         accept = false;
@@ -171,17 +183,15 @@ namespace HW1_CS408
             }
         }
 
-        void GameStart()
+        void GameStart() // When game start this thread will execute
         {
-            //checkLobby.Abort();
-            //acceptThread.Abort();
             Thread checkClientThread = new Thread(checkClientThreadCurr); // will check all clients connection all the time.
             checkClientThread.Start(); // thread start...
-            for (int i = 0; i < clientList.Count(); i++)
+            for (int i = 0; i < clientList.Count(); i++) // send all client game is started. 
             {
-                clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes("5"));
+                clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes("5")); // we send lenght 
                 Thread.Sleep(1000);
-                clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes("start"));
+                clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes("start")); // then we send actual string!
             }
             clientList = clientList.OrderBy(client => client.name).ToList();  // this sort the list in terms of name
             exit = false;
@@ -190,74 +200,76 @@ namespace HW1_CS408
             {
                 try
                 {
-                    Thread.Sleep(5000);
+                    Thread.Sleep(5000); // this isfor waiting other client! It prevent mixed !
                     index++;// changing the turn
-                    SetRichText(clientList[index].name + "'s turn" + Environment.NewLine);
-                    clientList[index].clientSockets.Send(Encoding.ASCII.GetBytes("27"));
+                    SetRichText(clientList[index%clientList.Count()].name + "'s turn" + Environment.NewLine);
+                    clientList[index % clientList.Count()].clientSockets.Send(Encoding.ASCII.GetBytes("27"));// send client who the turn has.
                     Thread.Sleep(1000);
-                    clientList[index].clientSockets.Send(Encoding.ASCII.GetBytes("Your Turn create a question"));
-                    ques = ReceiveByte(index);
-                    if (ques == "Exited")
+                    clientList[index % clientList.Count()].clientSockets.Send(Encoding.ASCII.GetBytes("Your Turn create a question"));
+                    checkClientThread.Suspend(); // suspend that thread because we dont wanna update the current client soc count! It will prevent that!
+                    ques = ReceiveByte(index % clientList.Count()); // take question! 
+                    if (ques == "Exited") // when client exited then this ques return!
                         continue;
-                    SetRichText(clientList[index].name + "'s question: " + ques + Environment.NewLine);
-                    answer = ReceiveByte(index);
-                    SetRichText(clientList[index].name + "'s answer: " + answer + Environment.NewLine);
+                    SetRichText(clientList[index % clientList.Count()].name + "'s question: " + ques + Environment.NewLine);
+                    answer = ReceiveByte(index % clientList.Count()); // take answer
+                    SetRichText(clientList[index % clientList.Count()].name + "'s answer: " + answer + Environment.NewLine);
                     List<String> answerList = new List<String>();
                     //mut.WaitOne();
-                    checkClientThread.Suspend();
                     for (int i = 1; i < clientList.Count(); i++) // send question all client.
                     {
                         clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes("17"));
                         Thread.Sleep(1000);
-                        clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes("Wait for question"));
+                        clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes("Wait for question")); // send waiting that question
                         SetRichText(clientList[((index + i) % clientList.Count())].name + " can answer the question. " + Environment.NewLine);
                         clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes(ques.Length.ToString()));//send question to others
                         Thread.Sleep(1000);
                         clientList[((index + i) % clientList.Count())].clientSockets.Send(Encoding.ASCII.GetBytes(ques));//send question to others
                     }            
-                    int counter = 0;
-                    while (counter != clientList.Count() - 1)
+                    int counter = 0; // counter for the while!
+                    while (counter != clientList.Count() - 1) // This is just simply busy waiting! 
                     {
-                        for (int i = 1; i < clientList.Count(); i++)
+                        for (int i = 1; i < clientList.Count(); i++) // looking for all client except the asker!
                         {
-                            if (clientList[((index + i) % clientList.Count())].clientSockets.Available != 0)
+                            if (clientList[((index + i) % clientList.Count())].clientSockets.Available != 0)// take the first sender ! 
                             {
                                 clientAnswer = ReceiveByte(((index + i) % clientList.Count()));
-                                if (clientAnswer != "Exited")
+                                if (clientAnswer != "Exited") // if exited then no update on rich text box!
                                     SetRichText(clientList[((index + i) % clientList.Count())].name + " answered the question." + Environment.NewLine);
                             }
                             else
                                 continue;
-                            if (clientAnswer == "Exited")
+                            if (clientAnswer == "Exited") // client send exited then It will exit but end of the turn
                             {
                                 counter++;
                                 continue;
                             }
-                            if (clientAnswer.Contains(answer)) // answer check
+                            if (clientAnswer == answer) // answer check 
                             {
                                 SetRichText(clientList[((index + i) % clientList.Count())].name + " answered correctly.So s/he get one point." + Environment.NewLine);
                                 client c = clientList[((index + i) % clientList.Count())];
                                 clientList.Remove(c);
-                                c.scores++;
+                                c.scores++; // When we update the client we remove and add simultionusly
                                 clientList.Add(c);
                                 clientList = clientList.OrderBy(client => client.name).ToList();  // this sort the list in terms of name
                                 SetRichText( "Current score is: " + clientList[((index + i) % clientList.Count())].scores+ Environment.NewLine);
-                                counter++;
+                                counter++; // Then update counter for the while loop
                             }
                             else
                             {
-                                if (clientAnswer == "Exited")
+                                if (clientAnswer == "Exited") // When the player exited then no give cout the about couldnt answer correctly!
                                 {
                                     counter++;
                                     continue;
                                 }
-                                SetRichText(clientList[((index + i) % clientList.Count())].name + " couldn't answered correctly. " + Environment.NewLine);
-                                counter++;
+                                else
+                                {
+                                    SetRichText(clientList[((index + i) % clientList.Count())].name + " couldn't answered correctly. " + Environment.NewLine);
+                                    counter++;
+                                }
                             }
                         }
                     }
-                    //mut.ReleaseMutex();
-                    checkClientThread.Resume();
+                    checkClientThread.Resume(); // then we updated exited client and update the list
                 }
                 catch (SocketException e)
                 {
@@ -265,21 +277,21 @@ namespace HW1_CS408
                 }
                 
             }
-            checkClientThread.Suspend();
-            if (index == totalTurn-1)//sending results.
+            checkClientThread.Suspend(); // we suspend it bcs we will exit all client we dont wanna mess up here!
+            if (index == totalTurn-1 )//sending results.
             {
                 clientList = clientList.OrderByDescending(client => client.scores).ThenBy(client => client.scores).ToList(); // this sort the list in terms of name
                 for (int i = 0; i < clientList.Count(); i++) // send question all client.
                 {
-                    String result = (i+1) + ". place => Your Total Score is " + clientList[i].scores.ToString();
+                    String result = (i+1) + ". place => Your Total Score is " + clientList[i].scores.ToString(); //result!
                     clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes(result.Length.ToString()));
                     Thread.Sleep(1000);
                     clientList[i].clientSockets.Send(Encoding.ASCII.GetBytes(result));
                     SetRichText(clientList[i].name + " " + (i+1) + ". place => Total Score is " + clientList[i].scores + Environment.NewLine);
                 }
-                Thread.Sleep(10000);
+                finished = true;
                 SetRichText("GAME END!" + Environment.NewLine);
-                CloseAllClients();
+                System.Windows.Forms.Application.Exit();
             }
         }
 
@@ -288,7 +300,7 @@ namespace HW1_CS408
             while (true)
             {
                 int clientSize = 0;
-                for (int i = 0; i < clientList.Count(); i++)
+                for (int i = 0; i < clientList.Count(); i++) // ıf there is exited client then update it!
                 {
                     if (!(clientList[i].clientSockets.Poll(1, SelectMode.SelectRead) && clientList[i].clientSockets.Available == 0))
                     {
@@ -303,16 +315,17 @@ namespace HW1_CS408
                         SetRichText(clientList.Count() + " player is left" + Environment.NewLine);
                     }
                 }
-                if (clientList.Count() < 2)
+                if (clientList.Count() < 2) // when client count is smaller then 2 then there is a winner!
                 {
                     String result = "You are the winner and game is finished";
                     exit = true; // to finish the loop
-                    clientList[0].clientSockets.Send(Encoding.ASCII.GetBytes(result.Length.ToString()));
+                    clientList[0].clientSockets.Send(Encoding.ASCII.GetBytes(result.Length.ToString())); // sendid you are a winner
                     Thread.Sleep(1000);
                     clientList[0].clientSockets.Send(Encoding.ASCII.GetBytes(result));
                     SetRichText(clientList[0].name + " is the winner" + Environment.NewLine);
-                    Thread.Sleep(5000);
+                    Thread.Sleep(2000);
                     CloseAllClients();
+
                 }
             }
         }
@@ -322,11 +335,13 @@ namespace HW1_CS408
             for (int i = 0; i < clientList.Count(); i++)
             {
                 Socket thisClient = clientList[i].clientSockets;
-                thisClient.Close();
+                if(!finished)
+                    thisClient.Close();
             }
             serverSocket.Close();
-            Thread.Sleep(10000);
-            System.Windows.Forms.Application.Exit();
+            Thread.Sleep(2000);
+            Environment.Exit(Environment.ExitCode); // kill all threads.
+            System.Windows.Forms.Application.Exit(); // exit the GUI
         }
 
         static String ReceiveName() // return name.
@@ -346,14 +361,14 @@ namespace HW1_CS408
         {
             try
             {
-                Socket thisClient = clientList[i].clientSockets;
+                Socket thisClient = clientList[i].clientSockets; // receive byte
                 Byte[] buffer = new Byte[64];
                 thisClient.Receive(buffer);
-                int len = int.Parse(Encoding.ASCII.GetString(buffer));
+                int len = int.Parse(Encoding.ASCII.GetString(buffer)); // take lenght
                 Array.Clear(buffer, 0, buffer.Length);
-                Byte[] bufferLen = new Byte[len];
+                Byte[] bufferLen = new Byte[len]; // create a new buffer in that lenght 
                 thisClient.Receive(bufferLen);
-                String name = Encoding.ASCII.GetString(bufferLen);
+                String name = Encoding.ASCII.GetString(bufferLen); //take the question or name 
                 return name;
             }
             catch
@@ -373,8 +388,8 @@ namespace HW1_CS408
 
         }
 
-        private void SetRichText(string text)
-        {
+        private void SetRichText(string text) // this is delegate rich text box! 
+        {   //We will use it when the access in threads!
             if (this.richTextBox1.InvokeRequired)
             {
                 StringArgReturningVoidDelegate d = new StringArgReturningVoidDelegate(SetRichText);
@@ -386,27 +401,28 @@ namespace HW1_CS408
             }
         }
 
-        private void button2_Click(object sender, EventArgs e)
+        private void button2_Click(object sender, EventArgs e) // when game is started button actived 
         {
-            if (clientList.Count() >= 2)
+            if (clientList.Count() >= 2) // if client number is 2 or more
             {
                 this.label3.Visible = false;
                 bool IsTextInt = Regex.IsMatch(textBox2.Text, @"^\d+$"); // if it is integer then turn true;
                 if (IsTextInt)
                 {
-                    acceptThread.Suspend();
+                    started = true; // thşs prevent after the game start accept thread is finish.
                     checkLobby.Suspend();
                     this.label4.Visible = false;
                     this.label1.Visible = false;
                     this.button2.Visible = false;
                     this.textBox2.Visible = false;
                     this.richTextBox1.Left -= 100;
-                    totalTurn = int.Parse(textBox2.Text);
+                    totalTurn = double.Parse(textBox2.Text);
                     receiveThread = new Thread(GameStart); // thread for new client
-                    started = true; // thşs prevent after the game start accept thread is finish.
+                    
                     receiveThread.Start();
+                    
                 }
-                else
+                else // then give an error it!
                 {
                     this.label4.Visible = true;
                 }
@@ -415,6 +431,12 @@ namespace HW1_CS408
             else
                 this.label3.Visible = true;
 
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            accept = false;
+            CloseAllClients();
         }
 
     }
